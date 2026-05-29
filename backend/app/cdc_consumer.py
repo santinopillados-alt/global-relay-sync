@@ -15,7 +15,7 @@ from confluent_kafka import Consumer, KafkaError, KafkaException
 import redis.asyncio as aioredis
 
 from app.config import settings
-from app.models import CDCEvent, ConflictEvent, SyncStats
+from app.models import ConflictEvent, SyncStats
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,6 @@ stats = SyncStats()
 
 def get_db_connection(url: str):
     """Crea conexión a PostgreSQL desde URL."""
-    # Parsear URL simple: postgresql://user:pass@host:port/db
     url = url.replace("postgresql://", "")
     credentials, rest = url.split("@")
     user, password = credentials.split(":")
@@ -56,7 +55,6 @@ def apply_insert(conn, table: str, data: dict):
     values = [data[k] for k in columns]
     placeholders = ", ".join(["%s"] * len(columns))
     col_names = ", ".join(columns)
-
     with conn.cursor() as cur:
         cur.execute(
             f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) ON CONFLICT (id) DO NOTHING",
@@ -70,7 +68,6 @@ def apply_update(conn, table: str, data: dict, record_id: int):
     columns = [k for k in data.keys() if k not in ("id", "created_at")]
     values = [data[k] for k in columns]
     set_clause = ", ".join([f"{col} = %s" for col in columns])
-
     with conn.cursor() as cur:
         cur.execute(
             f"UPDATE {table} SET {set_clause} WHERE id = %s",
@@ -97,10 +94,14 @@ def detect_conflict(before: dict, target_version: int) -> bool:
     return target_version > source_version
 
 
+def _build_alert_message(service: str, metric: str, value: float, severity: str) -> str:
+    """Construye mensaje de alerta para logging."""
+    return f"[{severity.upper()}] {service}: {metric}={value:.2f}"
+
+
 async def publish_to_observeiq(producer, event_type: str, message: str, level: str = "INFO"):
     """Envía logs a ObserveIQ via Kafka para monitoreo integrado."""
     try:
-        from confluent_kafka import Producer
         log_event = {
             "id": str(uuid.uuid4()),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -167,27 +168,25 @@ async def process_cdc_event(
 
     # ── Aplicar cambio ─────────────────────────────────────────────────
     try:
-        if operation == "C" and after:        # INSERT
+        if operation == "C" and after:
             apply_insert(target_conn, table, after)
             stats.inserts += 1
-        elif operation == "U" and after:      # UPDATE
+        elif operation == "U" and after:
             apply_update(target_conn, table, after, record_id)
             stats.updates += 1
-        elif operation == "D" and before:     # DELETE
+        elif operation == "D" and before:
             apply_delete(target_conn, table, record_id)
             stats.deletes += 1
 
         stats.total_events_processed += 1
         stats.last_sync_at = datetime.now(timezone.utc)
 
-        # Calcular latencia
         latency = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         stats.avg_replication_latency_ms = (
             (stats.avg_replication_latency_ms * (stats.total_events_processed - 1) + latency)
             / stats.total_events_processed
         )
 
-        # Publicar evento al canal live
         live_event = {
             "type": "cdc_event",
             "operation": operation,
