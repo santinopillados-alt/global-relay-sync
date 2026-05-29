@@ -1,140 +1,240 @@
-# Global-Relay Sync — Real-Time CDC Data Replication Platform
+# Research Intelligence System - MVP
 
-> An event-driven data synchronization pipeline that captures PostgreSQL changes via Write-Ahead Log (WAL), streams them through Apache Kafka, and replicates them to a target database with automatic conflict detection and sub-100ms latency.
+Sistema multiagente simple para investigación automática y generación de reportes.
 
----
+## 🎯 Objetivo
 
-## Architecture Overview
-┌─────────────────┐     ┌──────────────────────────────────────────┐
-│   Source DB      │     │           WAL CDC Pipeline               │
-│   PostgreSQL     │────▶│  ┌─────────────┐  ┌──────────────────┐  │
-│   (globalrelay)  │     │  │test_decoding│  │  Kafka Producer  │  │
-└─────────────────┘     │  └──────┬──────┘  └────────┬─────────┘  │
-└─────────┼───────────────────┼────────────┘
-│                   │
-▼                   ▼
-┌──────────────────────────────────┐
-│         Apache Kafka             │
-│   globalrelay.public.orders      │
-└──────────────┬───────────────────┘
-│ consume
-▼
-┌─────────────────┐
-│  FastAPI Backend │
-│  ┌─────────────┐│
-│  │CDC Consumer ││
-│  └──────┬──────┘│
-│         │        │
-│  ┌──────▼──────┐│
-│  │  Conflict   ││
-│  │  Detector   ││
-│  └──────┬──────┘│
-│         │        │
-│  ┌──────▼──────┐│
-│  │    Redis    ││
-│  │   Pub/Sub   ││
-│  └──────┬──────┘│
-└─────────┼────────┘
-│ WebSocket
-▼
-┌─────────────────┐     ┌─────────────────┐
-│  React Dashboard │     │   Target DB     │
-│  Live CDC events │     │   PostgreSQL    │
-│  Conflict panel  │     │   (replica)     │
-└─────────────────┘     └─────────────────┘
-## Tech Stack
+Demostrar un sistema de IA donde múltiples agentes colaboran en un workflow lineal para:
+1. Investigar un tema
+2. Estructurar hallazgos
+3. Generar reportes
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| **Source DB** | PostgreSQL 17 | Primary database with WAL enabled |
-| **CDC Mechanism** | PostgreSQL logical decoding | Captures row-level changes |
-| **Message Broker** | Apache Kafka 3.9 | Event streaming backbone |
-| **Backend** | FastAPI (Python 3.11) | REST API + WebSocket server |
-| **Cache/State** | Redis 7 | Event store + pub/sub channel |
-| **Frontend** | React 18 + Vite | Real-time replication dashboard |
-| **Target DB** | PostgreSQL 17 | Replica database |
+## 📦 Estructura del Proyecto
 
-## Key Features
-
-- **WAL-based CDC**: captures every INSERT, UPDATE, DELETE directly from PostgreSQL's write-ahead log — no triggers, no polling overhead
-- **Sub-100ms replication latency**: changes propagate from source to target in under 10ms on local setup
-- **Automatic conflict detection**: detects version conflicts using optimistic locking — when two versions of the same record diverge, the system flags it and applies last-write-wins resolution
-- **Event streaming**: full pipeline from DB change to React dashboard via Kafka → Redis pub/sub → WebSocket
-- **ObserveIQ integration**: replication events are forwarded to the ObserveIQ platform for cross-system monitoring
-
-## Running Locally
-
-**Prerequisites:** PostgreSQL 17, Apache Kafka 3.9, Redis, Python 3.11, Node.js 20
-
-```bash
-git clone https://github.com/santinopillados-alt/global-relay-sync
-cd global-relay-sync
+```
+research_ai_system/
+├── app/
+│   ├── __init__.py
+│   ├── models.py              # Contratos (Task, Result, Event, Context)
+│   ├── base_agent.py          # Clase abstracta de agentes
+│   ├── orchestrator.py        # Coordinador principal
+│   └── event_bus.py           # Sistema de eventos simple
+│
+├── agents/
+│   ├── __init__.py
+│   ├── research_agent.py      # Agente de investigación
+│   └── planner_agent.py       # Agente de estructuración
+│
+├── main.py                     # Punto de entrada
+├── requirements.txt            # Dependencias
+└── README.md                   # Este archivo
 ```
 
-**1 — Configure PostgreSQL WAL**
-```sql
-ALTER SYSTEM SET wal_level = logical;
--- Restart PostgreSQL after this
-```
+## 🚀 Inicio Rápido
 
-**2 — Start Kafka and Redis**
+### 1. Instalación
+
 ```bash
-# Kafka
-kafka-server-start.bat config/kraft/server.properties
-
-# Redis
-redis-server
-```
-
-**3 — Start backend**
-```bash
-cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --port 8002 --ws websockets
 ```
 
-**4 — Start CDC pipeline**
+### 2. Ejecutar el Sistema
+
 ```bash
-python -m app.wal_cdc      # WAL capture → Kafka
-python -m app.simulator    # generates test data
+python main.py
 ```
 
-**5 — Start frontend**
+Esto iniciará un workflow completo que:
+- Crea dos tareas (research + planning)
+- Registra dos agentes
+- Ejecuta el workflow de forma lineal
+- Genera un reporte en Markdown
+- Guarda resultados en JSON
+
+### 3. Salida
+
+El sistema genera:
+- `research_report.md` - Reporte formateado
+- `workflow_result.json` - Datos completos en JSON
+- `system.log` - Logs estructurados
+
+## 🧩 Componentes Clave
+
+### Models (contratos.py)
+
+```python
+Task              # Unidad de trabajo
+Result            # Resultado de ejecución
+Event             # Evento del sistema
+Context           # Contexto compartido
+AgentState        # Estado de agente
+ToolResult        # Resultado de herramienta
+```
+
+### BaseAgent
+
+```python
+class BaseAgent(ABC):
+    async def execute(task: Task, context: Context) -> Result
+    async def _execute_impl(task: Task, context: Context) -> Any  # Override
+    def get_capabilities() -> List[str]
+    def emit_event(event_type: str, payload: Dict)
+    def use_tool(tool_name: str, **kwargs) -> ToolResult
+```
+
+### Orchestrator
+
+```python
+orchestrator = Orchestrator()
+orchestrator.register_agent(agent)
+result = await orchestrator.execute_task(task, agent_id)
+results = await orchestrator.execute_workflow([(task1, agent1), (task2, agent2)])
+```
+
+### EventBus
+
+```python
+event_bus = EventBus()
+event_bus.subscribe("task.completed", handler)
+await event_bus.emit(event)
+```
+
+## 🧠 Flujo de Ejecución
+
+```
+Usuario: "Investiga tendencias IA 2026"
+    ↓
+[Orchestrator] Recibe solicitud
+    ↓
+[ResearchAgent] Investiga tema
+    ├─ Buscaría en web (TODO)
+    ├─ Sintetizaría hallazgos (TODO)
+    └─ Retorna: {"findings": [...], "confidence": 0.82}
+    ↓
+[Contexto] Se actualiza con hallazgos
+    ↓
+[PlannerAgent] Estructura reporte
+    ├─ Organiza datos
+    ├─ Genera insights
+    └─ Retorna: {"title": "...", "sections": [...]}
+    ↓
+[Orchestrator] Retorna resultado final
+    ↓
+Usuario recibe: Reporte estructurado
+```
+
+## 🎯 Filosofía de Diseño (MVP)
+
+### ✅ Lo que SÍ tiene el MVP
+
+- Flujo lineal determinístico (sin loops autónomos)
+- 2 agentes especializados
+- Contexto compartido simple
+- Event logging básico
+- Contratos versionables
+- Ejecución async
+
+### ❌ Lo que NO tiene el MVP (para después)
+
+- Persistencia en BD
+- Vector embeddings
+- Semantic memory
+- Distributed execution
+- Event replay
+- Multi-provider LLM
+- Capability discovery dinámico
+- Autonomy loops
+- Self-evaluation
+
+## 🛠️ Extensiones Futuras
+
+### Fase 2: Herramientas Reales
+- WebSearchTool (integración real)
+- LLMTool (OpenAI/Anthropic)
+- FileWriterTool
+
+### Fase 3: Más Agentes
+- CodingAgent
+- AnalysisAgent
+- ExecutorAgent
+
+### Fase 4: Persistencia
+- PostgreSQL storage
+- Redis cache
+- Vector DB
+
+### Fase 5: Observabilidad
+- Distributed tracing
+- Metrics
+- Dashboard
+
+## 📊 Métricas de Éxito
+
+El MVP es exitoso si:
+
+- [x] Flujo completo funciona end-to-end
+- [x] Agentes se comunican correctamente
+- [ ] Contexto se propaga sin problemas (necesita test)
+- [ ] Output es útil y estructurado
+- [ ] Sistema es debuggeable
+- [ ] Costo es controlado
+- [ ] Sin loops infinitos
+
+## 🔧 Testing
+
 ```bash
-cd frontend
-npm install
-npm run dev -- --port 3001
+python -m pytest tests/
 ```
 
-Dashboard → http://localhost:3001
+## 📝 Logging
 
-## API Reference
-GET  /health              → Service health check
-GET  /api/stats           → Replication statistics
-GET  /api/conflicts       → Detected conflicts
-GET  /api/orders/source   → Latest records in source DB
-GET  /api/orders/target   → Latest records in target DB
-WS   /ws                  → Real-time CDC event stream
-## Conflict Resolution Strategy
+El sistema genera logs estructurados en:
+- Console (INFO+)
+- `system.log` (DEBUG+)
 
-When a conflict is detected (target version > source version before the change):
+Buscar eventos específicos:
+```python
+from app import EventBus
 
-1. The conflict is logged with full before/after snapshots
-2. **Last-write-wins** is applied as the default resolution
-3. The conflict is stored in Redis and surfaced in the dashboard
-4. An alert is forwarded to ObserveIQ for cross-platform visibility
+bus = EventBus()
+task_events = bus.get_events("task.completed")
+```
 
-## Design Decisions
+## 🚫 Errores Comunes
 
-**Why WAL over triggers?**
-Trigger-based CDC adds write overhead to every transaction. WAL-based CDC reads the replication log asynchronously — zero impact on source DB performance, and changes are captured even if the consumer is temporarily offline (Kafka retains the messages).
+### "Agente no encontrado"
+```python
+# ❌ Incorrecto
+await orchestrator.execute_task(task, "unknown_agent")
 
-**Why Kafka between WAL and consumer?**
-Decoupling the capture from the apply step means the consumer can lag behind without losing events. Kafka's offset management also enables replay — if the target DB goes down, we can re-consume from any point in history.
+# ✅ Correcto
+orchestrator.register_agent(my_agent)
+await orchestrator.execute_task(task, my_agent.agent_id)
+```
 
-**Why optimistic locking for conflict detection?**
-Each record carries a `version` counter. On UPDATE, the consumer compares the expected version against the current target version. If they diverge, a conflict is raised. This is the same pattern used by Hibernate, Django ORM, and most enterprise replication systems.
+### "No hay hallazgos"
+El PlannerAgent requiere que ResearchAgent ejecute primero:
+```python
+# ✅ Correcto
+await orchestrator.execute_workflow([
+    (research_task, "research_agent"),   # Primero
+    (planning_task, "planner_agent"),    # Segundo
+])
+```
+
+## 📚 Recursos
+
+- Documento de arquitectura: `ARCHITECTURE.md` (próximamente)
+- Guide de desarrollo: `DEVELOPMENT.md` (próximamente)
+
+## 👥 Autores
+
+Sistema desarrollado con metodología de arquitectura senior:
+- Énfasis en contratos antes de código
+- MVP mínimo antes de framework
+- Validación de utilidad antes de complejidad
 
 ---
 
-Built by Santino — Portfolio project demonstrating CDC architecture, distributed data pipelines, and real-time replication systems.
+**Estado:** MVP Funcional v0.1
+**Última actualización:** 2026-05-19
